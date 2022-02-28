@@ -148,19 +148,20 @@ class ICacheModule(outer: ICache) extends LazyModuleImp(outer)
   // cycle).
   val refillsToOneBank = (2*tl_out.d.bits.data.getWidth == wordBits)
 
-  //pgIdxBits = 12
+  //pgIdxBits = 12 //page offset
   //def untagBits = blockOffBits + idxBits
   //def idxBits = log2Up(cacheParams.nSets)
   //def tagBits = tlBundleParams.addressBits - pgUntagBits
   //def pgUntagBits = if (usingVM) untagBits min pgIdxBits else untagBits
 
-  val is_pipt = (idxBits + blockOffBits) > pgIdxBits
-  val tag_hi = if(is_pipt) tlBundleParams.addressBits-1 else tagBits+untagBits-1  
-  val tag_lo = if(is_pipt) pgIdxBits else untagBits
-  val tag_bits = if(is_pipt) tlBundleParams.addressBits - pgIdxBits else tlBundleParams.addressBits - pgUntagBits
-  when(true.B) {
-    printf("fxxk tag: %d, %d, %d, %d, %d, %d, %d\n", idxBits.U, blockOffBits.U, pgIdxBits.U, untagBits.U, tag_hi.U, tag_lo.U, tag_bits.U)
-  }
+  val enable_sipt = (idxBits + blockOffBits) > pgIdxBits
+  val tag_hi = if(enable_sipt) tlBundleParams.addressBits-1 else tagBits+untagBits-1  
+  val tag_lo = if(enable_sipt) pgIdxBits else untagBits
+  val tag_bits = if(enable_sipt) tlBundleParams.addressBits - pgIdxBits else tlBundleParams.addressBits - pgUntagBits
+  // when(true.B) {
+  //   printf("sipt tag: %d, %d, %d, %d, %d, %d, %d\n", idxBits.U, blockOffBits.U, pgIdxBits.U, untagBits.U, tag_hi.U, tag_lo.U, tag_bits.U)
+  // }
+
   //debug
   val debug_cycles = freechips.rocketchip.util.WideCounter(32)
 
@@ -176,13 +177,13 @@ class ICacheModule(outer: ICache) extends LazyModuleImp(outer)
   val s2_pred_correct = RegNext(s1_pred_correct)
   s1_pred_correct := io.s1_paddr(13, 12) === s1_vaddr(13, 12)
 
-  when(s0_vaddr(31, 20) =/= 0.U){
-    // printf("icache cycles: %d, s0_valid: %d, s0_addr: 0x%x, s1_valid: %d, s1_addr: 0x%x\n", debug_cycles.value, s0_valid, s0_vaddr, s1_valid, s1_vaddr)
-  }
+  // when(s0_vaddr(31, 20) =/= 0.U){
+  //   printf("icache cycles: %d, s0_valid: %d, s0_addr: 0x%x, s1_valid: %d, s1_addr: 0x%x\n", debug_cycles.value, s0_valid, s0_vaddr, s1_valid, s1_vaddr)
+  // }
 
-  when((s0_vaddr(31, 20) =/= 0.U) && !s1_hit){
-    // printf("icache pred cycles: %d, pred: %d, hit: %d, valid: %d, vaddr: 0x%x, paddr: 0x%x\n", debug_cycles.value, s1_pred_correct, s1_hit, s1_valid, s1_vaddr, io.s1_paddr)
-  }
+  // when((s0_vaddr(31, 20) =/= 0.U) && !s1_hit){
+  //   printf("icache pred cycles: %d, pred: %d, hit: %d, valid: %d, vaddr: 0x%x, paddr: 0x%x\n", debug_cycles.value, s1_pred_correct, s1_hit, s1_valid, s1_vaddr, io.s1_paddr)
+  // }
 
   val s2_valid = RegNext(s1_valid && !io.s1_kill)
   val s2_hit = RegNext(s1_hit)
@@ -420,7 +421,7 @@ class ICacheModule(outer: ICache) extends LazyModuleImp(outer)
     "RAMs          : (" +  wordBits/nBanks + " x " + nSets*refillCycles + ") using " + nBanks + " banks",
     "" + (if (nBanks == 2) "Dual-banked" else "Single-banked"),
     "I-TLB ways    : " + cacheParams.nTLBWays + "\n",
-    "pipt: " + is_pipt, 
+    "sipt: " + enable_sipt, 
     "untagBits: " + untagBits, 
     "idxBits: " + idxBits,
     "tagBits: " + tagBits, 
