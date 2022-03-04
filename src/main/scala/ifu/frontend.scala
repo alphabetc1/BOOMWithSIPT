@@ -354,10 +354,6 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   // **** NextPC Select (F0) ****
   //      Send request to ICache
   // --------------------------------------------------------
-
-  //debug
-  val debug_cycles = freechips.rocketchip.util.WideCounter(32)
-
   val s0_vpc       = WireInit(0.U(vaddrBitsExtended.W))
   val s0_ghist     = WireInit((0.U).asTypeOf(new GlobalHistory))
   val s0_tsrc      = WireInit(0.U(BSRC_SZ.W))
@@ -376,6 +372,10 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   val f2_last_br = RegInit((0.U).asTypeOf(new LastBrachPredictorInfo))
   val f3_last_br = RegInit((0.U).asTypeOf(new LastBrachPredictorInfo))
 
+  // Debug info
+  val debug_flag = false.B
+  val debug_cycles = freechips.rocketchip.util.WideCounter(32)
+
 
   when (RegNext(reset.asBool) && !reset.asBool) {
     s0_valid   := true.B
@@ -384,17 +384,17 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
     s0_tsrc    := BSRC_C
 
     current_pred_set := 0.U
-    // when(s0_vpc(31, 20) =/= 0.U){
-    when(true.B){
-      // printf("cycle: %d, set pred bits place1: %d\n", debug_cycles.value, current_pred_set)
+    
+    when(debug_flag === true.B) {
+      printf("frontend f0, cycle: %d\n, reset pred set: %d\n", debug_cycles.value, current_pred_set)
     }
   }
 
   icache.io.req.valid     := s0_valid
   icache.io.req.bits.addr := Cat(Cat((s0_vpc >> 14), current_pred_set), s0_vpc(11,0))
 
-  when(s0_vpc(31, 20) =/= 0.U){
-    // printf("frontend cycle: %d, addr: 0x%x, vpc: 0x%x, pred_bits: %d\n", debug_cycles.value, icache.io.req.bits.addr, s0_vpc, current_pred_set)
+  when(debug_flag === true.B) {
+    printf("frontend f0, cycle: %d\n, addr: 0x%x, vpc: 0x%x, pred set: %d\n", debug_cycles.value, icache.io.req.bits.addr, s0_vpc, current_pred_set)
   }
 
   bpd.io.f0_req.valid      := s0_valid
@@ -492,9 +492,9 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
     s0_is_replay := false.B
 
     current_pred_set := s1_ppc(13, 12)
-    // when(true.B){
-    //   printf("cycle: %d, set pred bits place2: %d\n", debug_cycles.value, current_pred_set)
-    // }
+    when(debug_flag === true.B) {
+      printf("frontend f1, cycle: %d\n, set pred set: %d\n", debug_cycles.value, current_pred_set)
+    }
     
     // Jump to target predicted by FaMicroBTB
     when (f1_do_redirect) {
@@ -565,9 +565,9 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
     f1_clear := true.B
 
     current_pred_set := s2_ppc(13, 12)
-    // when(s0_vpc(31, 20) =/= 0.U){
-    when(true.B){
-      // printf("cycle: %d, set pred bits place3: %d\n", debug_cycles.value, current_pred_set)
+
+    when(debug_flag === true.B) {
+      printf("frontend f2, cycle: %d\n, set pred set: %d\n", debug_cycles.value, current_pred_set)
     }
   } 
   .elsewhen (s2_valid && f3_ready) {
@@ -586,9 +586,9 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
       s0_tsrc      := BSRC_2
 
       current_pred_set := s2_ppc(13, 12)
-      // when(true.B){
-      //   printf("cycle: %d, set pred bits place4: %d\n", debug_cycles.value, current_pred_set)
-      // }
+      when(debug_flag === true.B) {
+        printf("frontend f2, cycle: %d\n, set pred set: %d\n", debug_cycles.value, current_pred_set)
+      }
 
       // Jump to target predicted by BTB
       when (f2_do_redirect) {
@@ -930,8 +930,9 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
       s0_tsrc      := BSRC_3
 
       current_pred_set := last_pred_set
-      // printf("frontend cycles: %d, set pred bits place 5: %d\n", debug_cycles.value, current_pred_set)
-
+      when(debug_flag === true.B) {
+        printf("frontend f3, cycles: %d\n, set pred set: %d\n", debug_cycles.value, current_pred_set)
+      }
       f3_fetch_bundle.fsrc := BSRC_3
 
       // Jump to target predicted by BTB
@@ -1072,8 +1073,9 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
     s0_is_sfence := true.B
 
     current_pred_set := last_pred_set
-    // printf("frontend cycles: %d, set pred bits place 6: %d\n", debug_cycles.value, current_pred_set)
-
+    when(debug_flag === true.B) {
+      printf("frontend f5, cycles: %d\n, set pred set: %d\n", debug_cycles.value, current_pred_set)
+    }
   }.elsewhen (io.cpu.redirect_flush) {
     fb.io.clear := true.B
     f4_clear    := true.B
@@ -1093,7 +1095,9 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
     ftq.io.redirect.bits  := io.cpu.redirect_ftq_idx
 
     current_pred_set := last_pred_set
-    // printf("frontend cycles: %d, set pred bits place 7: %d\n", debug_cycles.value, current_pred_set)
+    when(debug_flag === true.B) {
+      printf("frontend f5, cycles: %d\n, set pred set: %d\n", debug_cycles.value, current_pred_set)
+    }
   }
 
   ftq.io.debug_ftq_idx := io.cpu.debug_ftq_idx

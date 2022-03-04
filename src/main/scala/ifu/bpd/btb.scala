@@ -111,6 +111,10 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
   // Returns the bit position of the least-significant high bit of the input bitvector.
   val s1_hit_ways = s1_hit_ohs.map { oh => PriorityEncoder(oh) }
 
+  // Debug info
+  val debug_flag = false.B
+  val debug_cycles = freechips.rocketchip.util.WideCounter(32)
+
   for (w <- 0 until bankWidth) {
     val entry_meta = s1_req_rmeta(s1_hit_ways(w))(w)
     val entry_btb  = s1_req_rbtb(s1_hit_ways(w))(w)
@@ -122,6 +126,16 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
     s1_is_br(w)  := !doing_reset && s1_resp(w).valid &&  entry_meta.is_br
     s1_is_jal(w) := !doing_reset && s1_resp(w).valid && !entry_meta.is_br
 
+    when (debug_flag && s1_hits(w)) {
+      printf("btb f1, cycle: %d", debug_cycles.value)
+      when (s1_is_br(w)) {
+        printf("hit with br")
+      }
+      .elsewhen(s1_is_jal(w)){
+        printf("hit with jal")
+      }
+      printf("\nvalid: %d, pc: 0x%x, target: 0x%x\n", s1_resp(w).valid, s1_idx << 3.U, s1_resp(w).bits)
+    }
 
     io.resp.f2(w) := io.resp_in(0).f2(w)
     io.resp.f3(w) := io.resp_in(0).f3(w)
@@ -132,6 +146,16 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
       when (RegNext(s1_is_jal(w))) {
         io.resp.f2(w).taken      := true.B
       }
+      when (debug_flag) {
+        printf("btb f2, cycle: %d", debug_cycles.value)
+        when (io.resp.f2(w).is_br) {
+          printf("with br")
+        }
+        .elsewhen(io.resp.f2(w).is_jal){
+          printf("with jal")
+        }
+        printf("\nvalid: %d, pc: 0x%x, target: 0x%x, taken: %d\n", io.resp.f2(w).predicted_pc.valid, RegNext(s1_idx) << 3.U, io.resp.f2(w).predicted_pc.bits, io.resp.f2(w).taken)
+      }
     }
     when (RegNext(RegNext(s1_hits(w)))) {
       io.resp.f3(w).predicted_pc := RegNext(io.resp.f2(w).predicted_pc)
@@ -139,6 +163,16 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
       io.resp.f3(w).is_jal       := RegNext(io.resp.f2(w).is_jal)
       when (RegNext(RegNext(s1_is_jal(w)))) {
         io.resp.f3(w).taken      := true.B
+      }
+      when (debug_flag) {
+        printf("btb f3, cycle: %d", debug_cycles.value)
+        when (io.resp.f3(w).is_br) {
+          printf("with br")
+        }
+        .elsewhen(io.resp.f3(w).is_jal){
+          printf("with jal")
+        }
+        printf("\nvalid: %d, pc: 0x%x, target: 0x%x, taken: %d\n", io.resp.f3(w).predicted_pc.valid, RegNext(RegNext(s1_idx)) << 3.U, io.resp.f3(w).predicted_pc.bits, io.resp.f3(w).taken)
       }
     }
   }
@@ -242,6 +276,11 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
     s1_btb_hit_index.way := s1_meta.write_way
     s1_btb_hit_index.valid := true.B
     s1_btb_hit_index.pc := s1_idx
+
+    when (debug_flag) {
+      printf("btb s1 hit, cycle: %d", debug_cycles.value)
+      printf("\npc: 0x%x, way: %d\n", s1_idx, s1_meta.write_way)
+    }
   }
 
   for (w <- 0 until bankWidth) {
@@ -267,6 +306,10 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
           VecInit(Seq.fill(bankWidth) {s1_update_wpred_set_data.asUInt}),
           s1_update_wpred_set_mask.asBools
         )
+        when (debug_flag) {
+          printf("btb update s1, cycle: %d", debug_cycles.value)
+          printf("\npc: 0x%x, cif_idx: %d, pred_set: %d, way: %d\n", update_pc, io.pred_set_update.bits.cfi_idx, io.pred_set_update.bits.pred_set, s1_btb_hit_index.way)
+        }
     }
 
     when ((s2_btb_hit_index.way === w.U || (w == 0 && nWays == 1).B) &&
@@ -276,6 +319,10 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
           VecInit(Seq.fill(bankWidth) {s1_update_wpred_set_data.asUInt}),
           s1_update_wpred_set_mask.asBools
         )
+        when (debug_flag) {
+          printf("btb update s2, cycle: %d", debug_cycles.value)
+          printf("\npc: 0x%x, cif_idx: %d, pred_set: %d, way: %d\n", update_pc, io.pred_set_update.bits.cfi_idx, io.pred_set_update.bits.pred_set, s2_btb_hit_index.way)
+        }
     }
 
     when ((s3_btb_hit_index.way === w.U || (w == 0 && nWays == 1).B) &&
@@ -285,6 +332,10 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
           VecInit(Seq.fill(bankWidth) {s1_update_wpred_set_data.asUInt}),
           s1_update_wpred_set_mask.asBools
         )
+        when (debug_flag) {
+          printf("btb update s1, cycle: %d", debug_cycles.value)
+          printf("\npc: 0x%x, cif_idx: %d, pred_set: %d, way: %d\n", update_pc, io.pred_set_update.bits.cfi_idx, io.pred_set_update.bits.pred_set, s3_btb_hit_index.way)
+        }
     } 
   }
 }
