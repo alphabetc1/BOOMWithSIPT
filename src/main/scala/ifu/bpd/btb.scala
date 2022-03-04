@@ -83,7 +83,7 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
   
   // Info about pred_set_index
   val pset = Seq.fill(nWays) { SyncReadMem(nSets, Vec(bankWidth, UInt(btbpredSetIndexSz.W))) }
-  val s1_btb_hit_index = Reg(new BTBIndexInfo())
+  val s1_btb_hit_index = RegInit((0.U).asTypeOf(new BTBIndexInfo()))
   val s2_btb_hit_index = RegNext(s1_btb_hit_index)
   val s3_btb_hit_index = RegNext(s2_btb_hit_index)
 
@@ -278,8 +278,8 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
     s1_btb_hit_index.pc := s1_idx
 
     when (debug_flag) {
-      printf("btb s1 hit, cycle: %d", debug_cycles.value)
-      printf("\npc: 0x%x, way: %d\n", s1_idx, s1_meta.write_way)
+      printf("btb hit s1, cycle: %d", debug_cycles.value)
+      printf("\npc: 0x%x, way: %d\n", s1_idx << 3.U, s1_meta.write_way)
     }
   }
 
@@ -287,17 +287,22 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
     val pred_set = s1_req_rpred(s1_hit_ways(w))(w).pred_set
     val pred_set_valid = s1_req_rpred(s1_hit_ways(w))(w).valid
 
-    when (RegNext(s1_resp(w).valid))  {
-      io.resp.f2_pred_set(w).bits := pred_set 
-      io.resp.f2_pred_set(w).valid := pred_set_valid
+    // Recv pred_set from MicroBTB
+    io.resp.f2_pred_set(w) := io.resp_in(0).f2_pred_set(w)
+    io.resp.f3_pred_set(w) := io.resp_in(0).f3_pred_set(w)
+
+    when (RegNext(s1_hits(w)))  {
+      io.resp.f2_pred_set(w).bits := RegNext(pred_set) 
+      io.resp.f2_pred_set(w).valid := RegNext(pred_set_valid)
     }
 
-    when (RegNext(RegNext(s1_resp(w).valid)))  {
+    when (RegNext(RegNext(s1_hits(w))))  {
       io.resp.f3_pred_set(w).bits := RegNext(io.resp.f2_pred_set(w).bits)
       io.resp.f3_pred_set(w).valid := RegNext(io.resp.f2_pred_set(w).valid)
     }
   }
 
+  // TODO: will it hit 3 times in one visit?
   for (w <- 0 until nWays) {
     when ((s1_btb_hit_index.way === w.U || (w == 0 && nWays == 1).B) &&
       io.pred_set_update.valid && s1_btb_hit_index.valid && (update_pc === s1_btb_hit_index.pc)) {
@@ -308,11 +313,10 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
         )
         when (debug_flag) {
           printf("btb update s1, cycle: %d", debug_cycles.value)
-          printf("\npc: 0x%x, cif_idx: %d, pred_set: %d, way: %d\n", update_pc, io.pred_set_update.bits.cfi_idx, io.pred_set_update.bits.pred_set, s1_btb_hit_index.way)
+          printf("\npc: 0x%x, cif_idx: %d, pred_set: %d, way: %d\n", update_pc << 3.U, io.pred_set_update.bits.cfi_idx, io.pred_set_update.bits.pred_set, s1_btb_hit_index.way)
         }
     }
-
-    when ((s2_btb_hit_index.way === w.U || (w == 0 && nWays == 1).B) &&
+    .elsewhen ((s2_btb_hit_index.way === w.U || (w == 0 && nWays == 1).B) &&
       io.pred_set_update.valid && s2_btb_hit_index.valid && (update_pc === s2_btb_hit_index.pc)) {
         pset(w).write(
           s2_btb_hit_index.pc,
@@ -321,11 +325,10 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
         )
         when (debug_flag) {
           printf("btb update s2, cycle: %d", debug_cycles.value)
-          printf("\npc: 0x%x, cif_idx: %d, pred_set: %d, way: %d\n", update_pc, io.pred_set_update.bits.cfi_idx, io.pred_set_update.bits.pred_set, s2_btb_hit_index.way)
+          printf("\npc: 0x%x, cif_idx: %d, pred_set: %d, way: %d\n", update_pc << 3.U, io.pred_set_update.bits.cfi_idx, io.pred_set_update.bits.pred_set, s2_btb_hit_index.way)
         }
     }
-
-    when ((s3_btb_hit_index.way === w.U || (w == 0 && nWays == 1).B) &&
+    .elsewhen ((s3_btb_hit_index.way === w.U || (w == 0 && nWays == 1).B) &&
       io.pred_set_update.valid && s3_btb_hit_index.valid && (update_pc === s3_btb_hit_index.pc)) {
         pset(w).write(
           s3_btb_hit_index.pc,
@@ -334,7 +337,7 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
         )
         when (debug_flag) {
           printf("btb update s1, cycle: %d", debug_cycles.value)
-          printf("\npc: 0x%x, cif_idx: %d, pred_set: %d, way: %d\n", update_pc, io.pred_set_update.bits.cfi_idx, io.pred_set_update.bits.pred_set, s3_btb_hit_index.way)
+          printf("\npc: 0x%x, cif_idx: %d, pred_set: %d, way: %d\n", update_pc << 3.U, io.pred_set_update.bits.cfi_idx, io.pred_set_update.bits.pred_set, s3_btb_hit_index.way)
         }
     } 
   }

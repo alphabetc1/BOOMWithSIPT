@@ -73,7 +73,7 @@ class FAMicroBTBBranchPredictorBank(params: BoomFAMicroBTBParams = BoomFAMicroBT
 
   // Info about pred_set_index
   val pset = RegInit((0.U).asTypeOf(Vec(nWays, Vec(bankWidth, new MicroBTBPredSetIndex))))
-  val s1_btb_hit_index = Reg(new MicroBTBIndexInfo())
+  val s1_btb_hit_index = RegInit((0.U).asTypeOf(new MicroBTBIndexInfo()))
   val s2_btb_hit_index = RegNext(s1_btb_hit_index)
   val s3_btb_hit_index = RegNext(s2_btb_hit_index)
 
@@ -94,6 +94,10 @@ class FAMicroBTBBranchPredictorBank(params: BoomFAMicroBTBParams = BoomFAMicroBT
   })
   val s1_hits     = s1_hit_ohs.map { oh => oh.reduce(_||_) }
   val s1_hit_ways = s1_hit_ohs.map { oh => PriorityEncoder(oh) }
+
+  // Debug info
+  val debug_flag = false.B
+  val debug_cycles = freechips.rocketchip.util.WideCounter(32)
 
   for (w <- 0 until bankWidth) {
     val entry_meta = meta(s1_hit_ways(w))(w)
@@ -123,6 +127,17 @@ class FAMicroBTBBranchPredictorBank(params: BoomFAMicroBTBParams = BoomFAMicroBT
     io.resp.f1(w).is_br        := s1_is_br(w)
     io.resp.f1(w).is_jal       := s1_is_jal(w)
     io.resp.f1(w).taken        := s1_taken(w)
+
+    when (debug_flag && s1_hits(w)) {
+      printf("microBtb f1, cycle: %d", debug_cycles.value)
+      when (s1_is_br(w)) {
+        printf("hit with br")
+      }
+      .elsewhen(s1_is_jal(w)){
+        printf("hit with jal")
+      }
+      printf("\nvalid: %d, pc: 0x%x, target: 0x%x, taken: %d\n", s1_resp(w).valid, s1_idx << 3.U, s1_resp(w).bits, s1_taken(w))
+    }
 
     io.resp.f2(w) := RegNext(io.resp.f1(w))
     io.resp.f3(w) := RegNext(io.resp.f2(w))
@@ -173,6 +188,11 @@ class FAMicroBTBBranchPredictorBank(params: BoomFAMicroBTBParams = BoomFAMicroBT
     s1_btb_hit_index.way := s1_meta.write_way
     s1_btb_hit_index.valid := 1.U
     s1_btb_hit_index.pc := s1_idx
+
+    when (debug_flag) {
+      printf("microBtb hit s1, cycle: %d", debug_cycles.value)
+      printf("\npc: 0x%x, way: %d\n", s1_idx << 3.U, s1_meta.write_way)
+    }
   }
 
   for (w <- 0 until bankWidth) {
@@ -188,16 +208,26 @@ class FAMicroBTBBranchPredictorBank(params: BoomFAMicroBTBParams = BoomFAMicroBT
   when(io.pred_set_update.valid && (update_pc === s1_btb_hit_index.pc) && s1_btb_hit_index.valid){
     pset(s1_btb_hit_index.way)(io.pred_set_update.bits.cfi_idx).valid := true.B
     pset(s1_btb_hit_index.way)(io.pred_set_update.bits.cfi_idx).pred_set := io.pred_set_update.bits.pred_set
+    when (debug_flag) {
+      printf("microBtb update s1, cycle: %d", debug_cycles.value)
+      printf("\npc: 0x%x, cif_idx: %d, pred_set: %d, way: %d\n", update_pc << 3.U, io.pred_set_update.bits.cfi_idx, io.pred_set_update.bits.pred_set, s1_btb_hit_index.way)
+    }
   }
-
-  when(io.pred_set_update.valid && (update_pc === s2_btb_hit_index.pc) && s2_btb_hit_index.valid){
+  .elsewhen(io.pred_set_update.valid && (update_pc === s2_btb_hit_index.pc) && s2_btb_hit_index.valid){
     pset(s2_btb_hit_index.way)(io.pred_set_update.bits.cfi_idx).valid := true.B
     pset(s2_btb_hit_index.way)(io.pred_set_update.bits.cfi_idx).pred_set := io.pred_set_update.bits.pred_set
+    when (debug_flag) {
+      printf("microBtb update s2, cycle: %d", debug_cycles.value)
+      printf("\npc: 0x%x, cif_idx: %d, pred_set: %d, way: %d\n", update_pc << 3.U, io.pred_set_update.bits.cfi_idx, io.pred_set_update.bits.pred_set, s2_btb_hit_index.way)
+    }
   }
-
-  when(io.pred_set_update.valid && (update_pc === s3_btb_hit_index.pc) && s3_btb_hit_index.valid){
+  .elsewhen(io.pred_set_update.valid && (update_pc === s3_btb_hit_index.pc) && s3_btb_hit_index.valid){
     pset(s3_btb_hit_index.way)(io.pred_set_update.bits.cfi_idx).valid := true.B
     pset(s3_btb_hit_index.way)(io.pred_set_update.bits.cfi_idx).pred_set := io.pred_set_update.bits.pred_set
+    when (debug_flag) {
+      printf("microBtb update s3, cycle: %d", debug_cycles.value)
+      printf("\npc: 0x%x, cif_idx: %d, pred_set: %d, way: %d\n", update_pc << 3.U, io.pred_set_update.bits.cfi_idx, io.pred_set_update.bits.pred_set, s3_btb_hit_index.way)
+    }
   }
 }
 
