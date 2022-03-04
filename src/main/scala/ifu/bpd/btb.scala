@@ -1,6 +1,7 @@
 package boom.ifu
 
 import chisel3._
+import chisel3.experimental.BundleLiterals._
 import chisel3.util._
 
 import freechips.rocketchip.config.{Field, Parameters}
@@ -49,6 +50,20 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
     val write_way = UInt(log2Ceil(nWays).W)
   }
 
+  // Update BTB entry when branch jump completes
+  class BTBIndexInfo extends Bundle{
+    val pc = UInt(vaddrBitsExtended.W)
+    val way = UInt(log2Ceil(nWays).W)
+    val valid = Bool()
+  }
+
+  // Info about pred set index
+  class BTBPredSetIndex extends Bundle{
+    val pred_set = UInt(2.W)
+    val valid = Bool()
+  }
+  val btbpredSetIndexSz = 3
+
   val s1_meta = Wire(new BTBPredictMeta)
   val f3_meta = RegNext(RegNext(s1_meta))
 
@@ -65,6 +80,12 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
   val meta     = Seq.fill(nWays) { SyncReadMem(nSets, Vec(bankWidth, UInt(btbMetaSz.W))) }
   val btb      = Seq.fill(nWays) { SyncReadMem(nSets, Vec(bankWidth, UInt(btbEntrySz.W))) }
   val ebtb     = SyncReadMem(extendedNSets, UInt(vaddrBitsExtended.W))
+  
+  // Info about pred_set_index
+  val pset = Seq.fill(nWays) { SyncReadMem(nSets, Vec(bankWidth, UInt(btbpredSetIndexSz.W))) }
+  val s1_btb_hit_index = Reg(new BTBIndexInfo())
+  val s2_btb_hit_index = RegNext(s1_btb_hit_index)
+  val s3_btb_hit_index = RegNext(s2_btb_hit_index)
 
   val mems = (((0 until nWays) map ({w:Int => Seq(
     (f"btb_meta_way$w", nSets, bankWidth * btbMetaSz),
@@ -74,6 +95,8 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
   val s1_req_rmeta = VecInit(meta.map { m => VecInit(m.read(s0_idx, s0_valid).map(_.asTypeOf(new BTBMeta))) })
   val s1_req_rebtb = ebtb.read(s0_idx, s0_valid)
   val s1_req_tag   = s1_idx >> log2Ceil(nSets)
+
+  val s1_req_rpred = VecInit(pset.map { p => VecInit(p.read(s0_idx, s0_valid).map(_.asTypeOf(new BTBPredSetIndex))) })
 
   val s1_resp   = Wire(Vec(bankWidth, Valid(UInt(vaddrBitsExtended.W))))
   val s1_is_br  = Wire(Vec(bankWidth, Bool()))
@@ -85,6 +108,7 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
     })
   })
   val s1_hits     = s1_hit_ohs.map { oh => oh.reduce(_||_) }
+  // Returns the bit position of the least-significant high bit of the input bitvector.
   val s1_hit_ways = s1_hit_ohs.map { oh => PriorityEncoder(oh) }
 
   for (w <- 0 until bankWidth) {
@@ -134,7 +158,10 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
     PriorityEncoder(s1_hit_ohs.map(_.asUInt).reduce(_|_)),
     alloc_way)
 
+  // val s1_update = RegNext(io.update)
+  // val s1_update_idx = fetchIdx(s1_update.pc)
   val s1_update_cfi_idx = s1_update.bits.cfi_idx.bits
+  // class BTBPredictMeta extends Bundle {val write_way = UInt(log2Ceil(nWays).W)}
   val s1_update_meta    = s1_update.bits.meta.asTypeOf(new BTBPredictMeta)
 
   val max_offset_value = Cat(0.B, ~(0.U((offsetSz-1).W))).asSInt
@@ -157,6 +184,12 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
     )
   )
   val s1_update_wmeta_data = Wire(Vec(bankWidth, new BTBMeta))
+
+  val s1_update_wpred_set_data = Wire(new BTBPredSetIndex)
+  s1_update_wpred_set_data.pred_set := io.pred_set_update.bits.pred_set
+  s1_update_wpred_set_data.valid := true.B
+  val s1_update_wpred_set_mask = UIntToOH(io.pred_set_update.bits.cfi_idx)
+  val update_pc = fetchIdx(io.pred_set_update.bits.pc)
 
   for (w <- 0 until bankWidth) {
     s1_update_wmeta_data(w).tag     := Mux(s1_update.bits.btb_mispredicts(w), 0.U, s1_update_idx >> log2Ceil(nSets))
@@ -187,7 +220,16 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
           (~(0.U(bankWidth.W))),
           s1_update_wmeta_mask).asBools
       )
-
+      // When update BTB, flush pred_set by set valid to false
+      pset(w).write(
+        Mux(doing_reset, 
+          reset_idx,
+          s1_update_idx),
+        VecInit(Seq.fill(bankWidth) { 0.U(btbpredSetIndexSz.W) }),
+        Mux(doing_reset,
+          (~(0.U(bankWidth.W))),
+          s1_update_wmeta_mask).asBools
+      )
 
     }
   }
@@ -195,5 +237,55 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
     ebtb.write(s1_update_idx, s1_update.bits.target)
   }
 
+
+  when (s1_hits.reduce(_||_)) {
+    s1_btb_hit_index.way := s1_meta.write_way
+    s1_btb_hit_index.valid := true.B
+    s1_btb_hit_index.pc := s1_idx
+  }
+
+  for (w <- 0 until bankWidth) {
+    val pred_set = s1_req_rpred(s1_hit_ways(w))(w).pred_set
+    val pred_set_valid = s1_req_rpred(s1_hit_ways(w))(w).valid
+
+    when (RegNext(s1_resp(w).valid))  {
+      io.resp.f2_pred_set(w).bits := pred_set 
+      io.resp.f2_pred_set(w).valid := pred_set_valid
+    }
+
+    when (RegNext(RegNext(s1_resp(w).valid)))  {
+      io.resp.f3_pred_set(w).bits := RegNext(io.resp.f2_pred_set(w).bits)
+      io.resp.f3_pred_set(w).valid := RegNext(io.resp.f2_pred_set(w).valid)
+    }
+  }
+
+  for (w <- 0 until nWays) {
+    when ((s1_btb_hit_index.way === w.U || (w == 0 && nWays == 1).B) &&
+      io.pred_set_update.valid && s1_btb_hit_index.valid && (update_pc === s1_btb_hit_index.pc)) {
+        pset(w).write(
+          s1_btb_hit_index.pc,
+          VecInit(Seq.fill(bankWidth) {s1_update_wpred_set_data.asUInt}),
+          s1_update_wpred_set_mask.asBools
+        )
+    }
+
+    when ((s2_btb_hit_index.way === w.U || (w == 0 && nWays == 1).B) &&
+      io.pred_set_update.valid && s2_btb_hit_index.valid && (update_pc === s2_btb_hit_index.pc)) {
+        pset(w).write(
+          s2_btb_hit_index.pc,
+          VecInit(Seq.fill(bankWidth) {s1_update_wpred_set_data.asUInt}),
+          s1_update_wpred_set_mask.asBools
+        )
+    }
+
+    when ((s3_btb_hit_index.way === w.U || (w == 0 && nWays == 1).B) &&
+      io.pred_set_update.valid && s3_btb_hit_index.valid && (update_pc === s3_btb_hit_index.pc)) {
+        pset(w).write(
+          s3_btb_hit_index.pc,
+          VecInit(Seq.fill(bankWidth) {s1_update_wpred_set_data.asUInt}),
+          s1_update_wpred_set_mask.asBools
+        )
+    } 
+  }
 }
 

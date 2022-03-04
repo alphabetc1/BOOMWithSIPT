@@ -25,8 +25,14 @@ class BranchPrediction(implicit p: Parameters) extends BoomBundle()(p)
   val is_jal          = Bool()
   // What is the target of his branch/jump? Do we know the target?
   val predicted_pc    = Valid(UInt(vaddrBitsExtended.W))
+}
 
-
+// A index for update pred_set_index in BTB
+class BTBPredSetUpdate(implicit p: Parameters) extends BoomBundle()(p) 
+{
+  val pc = UInt(vaddrBitsExtended.W) 
+  val cfi_idx = UInt(2.W)
+  val pred_set = UInt(2.W)
 }
 
 // A branch prediction for a entire fetch-width worth of instructions
@@ -127,6 +133,10 @@ class BranchPredictionBankResponse(implicit p: Parameters) extends BoomBundle()(
   val f1 = Vec(bankWidth, new BranchPrediction)
   val f2 = Vec(bankWidth, new BranchPrediction)
   val f3 = Vec(bankWidth, new BranchPrediction)
+
+  val f1_pred_set = Vec(bankWidth, Valid(UInt(2.W)))
+  val f2_pred_set = Vec(bankWidth, Valid(UInt(2.W)))
+  val f3_pred_set = Vec(bankWidth, Valid(UInt(2.W)))
 }
 
 abstract class BranchPredictorBank(implicit p: Parameters) extends BoomModule()(p)
@@ -154,6 +164,8 @@ abstract class BranchPredictorBank(implicit p: Parameters) extends BoomModule()(
     val f3_fire = Input(Bool())
 
     val update = Input(Valid(new BranchPredictionBankUpdate))
+
+    val pred_set_update = Input(Valid(new BTBPredSetUpdate()))
   })
   io.resp := io.resp_in(0)
 
@@ -209,6 +221,8 @@ class BranchPredictor(implicit p: Parameters) extends BoomModule()(p)
 
     // Update
     val update = Input(Valid(new BranchPredictionUpdate))
+
+    val pred_set_update = Input(Valid(new BTBPredSetUpdate()))
   })
 
   var total_memsize = 0
@@ -240,8 +254,12 @@ class BranchPredictor(implicit p: Parameters) extends BoomModule()(p)
     banked_predictors(0).io.f1_lhist := banked_lhist_providers(0).io.f1_lhist
 
     banked_predictors(0).io.resp_in(0)           := (0.U).asTypeOf(new BranchPredictionBankResponse)
+    banked_predictors(0).io.pred_set_update := io.pred_set_update
   } else {
     require(nBanks == 2)
+
+    banked_predictors(0).io.pred_set_update := io.pred_set_update
+    banked_predictors(1).io.pred_set_update := io.pred_set_update
 
     banked_predictors(0).io.resp_in(0)           := (0.U).asTypeOf(new BranchPredictionBankResponse)
     banked_predictors(1).io.resp_in(0)           := (0.U).asTypeOf(new BranchPredictionBankResponse)

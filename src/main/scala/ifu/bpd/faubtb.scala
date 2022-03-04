@@ -50,12 +50,32 @@ class FAMicroBTBBranchPredictorBank(params: BoomFAMicroBTBParams = BoomFAMicroBT
     val write_way = UInt(log2Ceil(nWays).W)
   }
 
+  // Update MicroBTB entry when branch jump completes
+  class MicroBTBIndexInfo extends Bundle{
+    val pc = UInt(vaddrBitsExtended.W)
+    val way = UInt(log2Ceil(nWays).W)
+    val valid = Bool()
+  }
+
+  // Info about pred set index
+  class MicroBTBPredSetIndex extends Bundle{
+    val pred_set = UInt(2.W)
+    val valid = Bool()
+  }
+  val btbpredSetIndexSz = 3
+
   val s1_meta = Wire(new MicroBTBPredictMeta)
   override val metaSz = s1_meta.asUInt.getWidth
 
 
   val meta     = RegInit((0.U).asTypeOf(Vec(nWays, Vec(bankWidth, new MicroBTBMeta))))
   val btb      = Reg(Vec(nWays, Vec(bankWidth, new MicroBTBEntry)))
+
+  // Info about pred_set_index
+  val pset = RegInit((0.U).asTypeOf(Vec(nWays, Vec(bankWidth, new MicroBTBPredSetIndex))))
+  val s1_btb_hit_index = Reg(new MicroBTBIndexInfo())
+  val s2_btb_hit_index = RegNext(s1_btb_hit_index)
+  val s3_btb_hit_index = RegNext(s2_btb_hit_index)
 
   val mems = Nil
 
@@ -129,6 +149,7 @@ class FAMicroBTBBranchPredictorBank(params: BoomFAMicroBTBParams = BoomFAMicroBT
   // Write the BTB with the target
   when (s1_update.valid && s1_update.bits.cfi_taken && s1_update.bits.cfi_idx.valid && s1_update.bits.is_commit_update) {
     btb(s1_update_write_way)(s1_update_cfi_idx).offset := new_offset_value
+    pset(s1_update_write_way)(s1_update_cfi_idx).valid := 0.U
   }
 
   // Write the meta
@@ -148,5 +169,35 @@ class FAMicroBTBBranchPredictorBank(params: BoomFAMicroBTBParams = BoomFAMicroBT
     }
   }
 
+  when (s1_hits.reduce(_||_)) {
+    s1_btb_hit_index.way := s1_meta.write_way
+    s1_btb_hit_index.valid := 1.U
+    s1_btb_hit_index.pc := s1_idx
+  }
+
+  for (w <- 0 until bankWidth) {
+    io.resp.f1_pred_set(w).bits := pset(s1_hit_ways(w))(w).pred_set 
+    io.resp.f1_pred_set(w).valid := pset(s1_hit_ways(w))(w).valid
+  }
+
+  io.resp.f2_pred_set := RegNext(io.resp.f1_pred_set)
+  io.resp.f3_pred_set := RegNext(io.resp.f2_pred_set)
+
+  // Update pred_set in MicroBTB after address translation
+  val update_pc = fetchIdx(io.pred_set_update.bits.pc)
+  when(io.pred_set_update.valid && (update_pc === s1_btb_hit_index.pc) && s1_btb_hit_index.valid){
+    pset(s1_btb_hit_index.way)(io.pred_set_update.bits.cfi_idx).valid := true.B
+    pset(s1_btb_hit_index.way)(io.pred_set_update.bits.cfi_idx).pred_set := io.pred_set_update.bits.pred_set
+  }
+
+  when(io.pred_set_update.valid && (update_pc === s2_btb_hit_index.pc) && s2_btb_hit_index.valid){
+    pset(s2_btb_hit_index.way)(io.pred_set_update.bits.cfi_idx).valid := true.B
+    pset(s2_btb_hit_index.way)(io.pred_set_update.bits.cfi_idx).pred_set := io.pred_set_update.bits.pred_set
+  }
+
+  when(io.pred_set_update.valid && (update_pc === s3_btb_hit_index.pc) && s3_btb_hit_index.valid){
+    pset(s3_btb_hit_index.way)(io.pred_set_update.bits.cfi_idx).valid := true.B
+    pset(s3_btb_hit_index.way)(io.pred_set_update.bits.cfi_idx).pred_set := io.pred_set_update.bits.pred_set
+  }
 }
 
