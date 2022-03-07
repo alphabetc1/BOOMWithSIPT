@@ -59,7 +59,7 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
 
   // Info about pred set index
   class BTBPredSetIndex extends Bundle{
-    val pred_set = UInt(2.W)
+    val pred_set = UInt(predSetBits.W)
     val valid = Bool()
   }
   val btbpredSetIndexSz = 3

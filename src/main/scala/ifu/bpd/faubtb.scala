@@ -59,7 +59,7 @@ class FAMicroBTBBranchPredictorBank(params: BoomFAMicroBTBParams = BoomFAMicroBT
 
   // Info about pred set index
   class MicroBTBPredSetIndex extends Bundle{
-    val pred_set = UInt(2.W)
+    val pred_set = UInt(predSetBits.W)
     val valid = Bool()
   }
   val btbpredSetIndexSz = 3

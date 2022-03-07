@@ -365,7 +365,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   val s0_replay_ppc  = Wire(UInt())
   val s0_s1_use_f3_bpd_resp = WireInit(false.B)
 
-  val current_pred_set = WireInit(0.U(2.W))
+  val current_pred_set = WireInit(0.U(predSetBits.W))
   val last_pred_set = RegNext(current_pred_set)
 
   val f1_last_br = RegInit((0.U).asTypeOf(new LastBrachPredictorInfo))
@@ -681,7 +681,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   f3_fetch_bundle.shadowed_mask := f3_shadowed_mask
 
         current_pred_set := Mux(f2_do_redirect && f2_pred_set_valid, f2_pred_set, s2_ppc(13, 12))
-  val f3_pred_set = Wire(Vec(fetchWidth, UInt(2.W)))
+  val f3_pred_set = Wire(Vec(fetchWidth, UInt(predSetBits.W)))
   val f3_pred_set_valid = Wire(Vec(fetchWidth,Bool()))
   // Tracks trailing 16b of previous fetch packet
   val f3_prev_half    = Reg(UInt(16.W))
