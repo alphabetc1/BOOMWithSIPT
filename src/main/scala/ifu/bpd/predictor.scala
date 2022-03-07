@@ -45,6 +45,7 @@ class BranchPredictionBundle(implicit p: Parameters) extends BoomBundle()(p)
   val preds = Vec(fetchWidth, new BranchPrediction)
   val meta = Output(Vec(nBanks, UInt(bpdMaxMetaLength.W)))
   val lhist = Output(Vec(nBanks, UInt(localHistoryLength.W)))
+  var pred_set = Output(Vec(fetchWidth, Valid(UInt(2.W))))
 }
 
 
@@ -319,6 +320,10 @@ class BranchPredictor(implicit p: Parameters) extends BoomModule()(p)
     io.resp.f3.meta(0)  := banked_predictors(0).io.f3_meta
     io.resp.f3.lhist(0) := banked_lhist_providers(0).io.f3_lhist
 
+    io.resp.f1.pred_set := banked_predictors(0).io.resp.f1_pred_set
+    io.resp.f2.pred_set := banked_predictors(0).io.resp.f2_pred_set
+    io.resp.f3.pred_set := banked_predictors(0).io.resp.f3_pred_set
+
     banked_predictors(0).io.f3_fire := io.f3_fire
     banked_lhist_providers(0).io.f3_fire := io.f3_fire
   } else {
@@ -344,11 +349,17 @@ class BranchPredictor(implicit p: Parameters) extends BoomModule()(p)
       for (i <- 0 until bankWidth) {
         io.resp.f1.preds(i)           := banked_predictors(0).io.resp.f1(i)
         io.resp.f1.preds(i+bankWidth) := banked_predictors(1).io.resp.f1(i)
+
+        io.resp.f1.pred_set(i)        := banked_predictors(0).io.resp.f1_pred_set(i)
+        io.resp.f1.pred_set(i+bankWidth) := banked_predictors(1).io.resp.f1_pred_set(i)
       }
     } .otherwise {
       for (i <- 0 until bankWidth) {
         io.resp.f1.preds(i)           := banked_predictors(1).io.resp.f1(i)
         io.resp.f1.preds(i+bankWidth) := banked_predictors(0).io.resp.f1(i)
+
+        io.resp.f1.pred_set(i)           := banked_predictors(1).io.resp.f1_pred_set(i)
+        io.resp.f1.pred_set(i+bankWidth) := banked_predictors(0).io.resp.f1_pred_set(i)
       }
     }
 
@@ -356,11 +367,17 @@ class BranchPredictor(implicit p: Parameters) extends BoomModule()(p)
       for (i <- 0 until bankWidth) {
         io.resp.f2.preds(i)           := banked_predictors(0).io.resp.f2(i)
         io.resp.f2.preds(i+bankWidth) := banked_predictors(1).io.resp.f2(i)
+
+        io.resp.f2.pred_set(i)           := banked_predictors(0).io.resp.f2_pred_set(i)
+        io.resp.f2.pred_set(i+bankWidth) := banked_predictors(1).io.resp.f2_pred_set(i)
       }
     } .otherwise {
       for (i <- 0 until bankWidth) {
         io.resp.f2.preds(i)           := banked_predictors(1).io.resp.f2(i)
         io.resp.f2.preds(i+bankWidth) := banked_predictors(0).io.resp.f2(i)
+
+        io.resp.f2.pred_set(i)           := banked_predictors(1).io.resp.f2_pred_set(i)
+        io.resp.f2.pred_set(i+bankWidth) := banked_predictors(0).io.resp.f2_pred_set(i)
       }
     }
 
@@ -368,11 +385,17 @@ class BranchPredictor(implicit p: Parameters) extends BoomModule()(p)
       for (i <- 0 until bankWidth) {
         io.resp.f3.preds(i)           := banked_predictors(0).io.resp.f3(i)
         io.resp.f3.preds(i+bankWidth) := banked_predictors(1).io.resp.f3(i)
+
+        io.resp.f3.pred_set(i)           := banked_predictors(0).io.resp.f3_pred_set(i)
+        io.resp.f3.pred_set(i+bankWidth) := banked_predictors(1).io.resp.f3_pred_set(i)
       }
     } .otherwise {
       for (i <- 0 until bankWidth) {
         io.resp.f3.preds(i)           := banked_predictors(1).io.resp.f3(i)
         io.resp.f3.preds(i+bankWidth) := banked_predictors(0).io.resp.f3(i)
+
+        io.resp.f3.pred_set(i)           := banked_predictors(1).io.resp.f3_pred_set(i)
+        io.resp.f3.pred_set(i+bankWidth) := banked_predictors(0).io.resp.f3_pred_set(i)
       }
     }
   }

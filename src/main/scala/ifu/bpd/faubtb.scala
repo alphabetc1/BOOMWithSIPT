@@ -186,13 +186,15 @@ class FAMicroBTBBranchPredictorBank(params: BoomFAMicroBTBParams = BoomFAMicroBT
 
   when (s1_hits.reduce(_||_)) {
     s1_btb_hit_index.way := s1_meta.write_way
-    s1_btb_hit_index.valid := 1.U
+    s1_btb_hit_index.valid := true.B
     s1_btb_hit_index.pc := s1_idx
 
     when (debug_flag) {
       printf("microBtb hit s1, cycle: %d", debug_cycles.value)
       printf("\npc: 0x%x, way: %d\n", s1_idx << 3.U, s1_meta.write_way)
     }
+  }.otherwise {
+    s1_btb_hit_index.valid := false.B
   }
 
   for (w <- 0 until bankWidth) {

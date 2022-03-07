@@ -472,7 +472,8 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   val f1_predicted_target = Mux(f1_do_redirect,
                                 f1_targs(f1_redirect_idx),
                                 nextFetch(s1_vpc))
-
+  val f1_pred_set = s1_bpd_resp.pred_set(f1_redirect_idx).bits
+  val f1_pred_set_valid = s1_bpd_resp.pred_set(f1_redirect_idx).valid
   val f1_predicted_ghist = s1_ghist.update(
     s1_bpd_resp.preds.map(p => p.is_br && p.predicted_pc.valid).asUInt & f1_mask,
     s1_bpd_resp.preds(f1_redirect_idx).taken && f1_do_redirect,
@@ -491,7 +492,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
     s0_ghist     := f1_predicted_ghist
     s0_is_replay := false.B
 
-    current_pred_set := s1_ppc(13, 12)
+    current_pred_set := Mux(f1_do_redirect && f1_pred_set_valid, f1_pred_set, s1_ppc(13, 12))
     when(debug_flag === true.B) {
       printf("frontend f1, cycle: %d\n, set pred set: %d\n", debug_cycles.value, current_pred_set)
     }
@@ -550,7 +551,8 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
     s2_vpc,
     false.B,
     false.B)
-
+  val f2_pred_set = f2_bpd_resp.pred_set(f2_redirect_idx).bits
+  val f2_pred_set_valid = f2_bpd_resp.pred_set(f2_redirect_idx).valid
   val f2_correct_f1_ghist = s1_ghist =/= f2_predicted_ghist && enableGHistStallRepair.B
 
   when ((s2_valid && !icache.io.resp.valid) ||
@@ -565,7 +567,6 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
     f1_clear := true.B
 
     current_pred_set := s2_ppc(13, 12)
-
     when(debug_flag === true.B) {
       printf("frontend f2, cycle: %d\n, set pred set: %d\n", debug_cycles.value, current_pred_set)
     }
@@ -584,8 +585,9 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
       s0_ghist     := f2_predicted_ghist
       s2_fsrc      := BSRC_2
       s0_tsrc      := BSRC_2
+            
+      current_pred_set := Mux(f2_do_redirect && f2_pred_set_valid, f2_pred_set, s2_ppc(13, 12))
 
-      current_pred_set := s2_ppc(13, 12)
       when(debug_flag === true.B) {
         printf("frontend f2, cycle: %d\n, set pred set: %d\n", debug_cycles.value, current_pred_set)
       }
@@ -678,11 +680,13 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   f3_fetch_bundle.tsrc := f3_imemresp.tsrc
   f3_fetch_bundle.shadowed_mask := f3_shadowed_mask
 
+        current_pred_set := Mux(f2_do_redirect && f2_pred_set_valid, f2_pred_set, s2_ppc(13, 12))
+  val f3_pred_set = Wire(Vec(fetchWidth, UInt(2.W)))
+  val f3_pred_set_valid = Wire(Vec(fetchWidth,Bool()))
   // Tracks trailing 16b of previous fetch packet
   val f3_prev_half    = Reg(UInt(16.W))
   // Tracks if last fetchpacket contained a half-inst
   val f3_prev_is_half = RegInit(false.B)
-
   require(fetchWidth >= 4) // Logic gets kind of annoying with fetchWidth = 2
   def isRVC(inst: UInt) = (inst(1,0) =/= 3.U)
   var redirect_found = false.B
@@ -786,13 +790,13 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
       f3_targs (i) := Mux(brsigs.cfi_type === CFI_JALR,
         f3_bpd_resp.io.deq.bits.preds(i).predicted_pc.bits,
         brsigs.target)
-
       // Flush BTB entries for JALs if we mispredict the target
       f3_btb_mispredicts(i) := (brsigs.cfi_type === CFI_JAL && valid &&
         f3_bpd_resp.io.deq.bits.preds(i).predicted_pc.valid &&
         (f3_bpd_resp.io.deq.bits.preds(i).predicted_pc.bits =/= brsigs.target)
       )
-
+      f3_pred_set(i)     := f3_bpd_resp.io.deq.bits.pred_set(i).bits
+      f3_pred_set_valid(i) := Mux(brsigs.cfi_type === CFI_BR, f3_bpd_resp.io.deq.bits.preds(i).predicted_pc.valid, true.B) && f3_bpd_resp.io.deq.bits.pred_set(i).valid
 
       f3_npc_plus4_mask(i) := (if (w == 0) {
         !f3_is_rvc(i) && !bank_prev_is_half
@@ -868,7 +872,6 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   when (f3_clear) {
     f3_prev_is_half := false.B
   }
-
   f3_fetch_bundle.cfi_idx.valid := f3_redirects.reduce(_||_)
   f3_fetch_bundle.cfi_idx.bits  := PriorityEncoder(f3_redirects)
 
@@ -929,11 +932,12 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
       s0_ghist     := f3_predicted_ghist
       s0_tsrc      := BSRC_3
 
-      current_pred_set := last_pred_set
       when(debug_flag === true.B) {
         printf("frontend f3, cycles: %d\n, set pred set: %d\n", debug_cycles.value, current_pred_set)
       }
       f3_fetch_bundle.fsrc := BSRC_3
+
+      current_pred_set := Mux(f3_redirects.reduce(_||_) && f3_pred_set_valid(PriorityEncoder(f3_redirects)), f3_pred_set(PriorityEncoder(f3_redirects)), last_pred_set)
 
       // Jump to target predicted by BTB
       when(f3_redirects.reduce(_||_)){
