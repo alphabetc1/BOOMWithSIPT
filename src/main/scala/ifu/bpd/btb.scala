@@ -118,6 +118,9 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
   for (w <- 0 until bankWidth) {
     val entry_meta = s1_req_rmeta(s1_hit_ways(w))(w)
     val entry_btb  = s1_req_rbtb(s1_hit_ways(w))(w)
+    val entry_pred_set_valid = s1_req_rpred(s1_hit_ways(w))(w).valid
+    val entry_pred_set = s1_req_rpred(s1_hit_ways(w))(w).pred_set
+
     s1_resp(w).valid := !doing_reset && s1_valid && s1_hits(w)
     s1_resp(w).bits  := Mux(
       entry_btb.extended,
@@ -143,6 +146,8 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
       io.resp.f2(w).predicted_pc := RegNext(s1_resp(w))
       io.resp.f2(w).is_br        := RegNext(s1_is_br(w))
       io.resp.f2(w).is_jal       := RegNext(s1_is_jal(w))
+      io.resp.f2(w).pred_set.bits     := RegNext(entry_pred_set)
+      io.resp.f2(w).pred_set.valid := RegNext(entry_pred_set_valid)
       when (RegNext(s1_is_jal(w))) {
         io.resp.f2(w).taken      := true.B
       }
@@ -161,6 +166,9 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
       io.resp.f3(w).predicted_pc := RegNext(io.resp.f2(w).predicted_pc)
       io.resp.f3(w).is_br        := RegNext(io.resp.f2(w).is_br)
       io.resp.f3(w).is_jal       := RegNext(io.resp.f2(w).is_jal)
+      io.resp.f3(w).pred_set.bits     := RegNext(io.resp.f2(w).pred_set.bits)
+      io.resp.f3(w).pred_set.valid := RegNext(io.resp.f2(w).pred_set.valid)
+      
       when (RegNext(RegNext(s1_is_jal(w)))) {
         io.resp.f3(w).taken      := true.B
       }
@@ -280,25 +288,6 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
     when (debug_flag) {
       printf("btb hit s1, cycle: %d", debug_cycles.value)
       printf("\npc: 0x%x, way: %d\n", s1_idx << 3.U, s1_meta.write_way)
-    }
-  }
-
-  for (w <- 0 until bankWidth) {
-    val pred_set = s1_req_rpred(s1_hit_ways(w))(w).pred_set
-    val pred_set_valid = s1_req_rpred(s1_hit_ways(w))(w).valid
-
-    // Recv pred_set from MicroBTB
-    io.resp.f2_pred_set(w) := io.resp_in(0).f2_pred_set(w)
-    io.resp.f3_pred_set(w) := io.resp_in(0).f3_pred_set(w)
-
-    when (RegNext(s1_hits(w)))  {
-      io.resp.f2_pred_set(w).bits := RegNext(pred_set) 
-      io.resp.f2_pred_set(w).valid := RegNext(pred_set_valid)
-    }
-
-    when (RegNext(RegNext(s1_hits(w))))  {
-      io.resp.f3_pred_set(w).bits := RegNext(io.resp.f2_pred_set(w).bits)
-      io.resp.f3_pred_set(w).valid := RegNext(io.resp.f2_pred_set(w).valid)
     }
   }
 

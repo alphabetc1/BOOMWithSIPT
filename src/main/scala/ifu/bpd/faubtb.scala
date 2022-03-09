@@ -86,6 +86,7 @@ class FAMicroBTBBranchPredictorBank(params: BoomFAMicroBTBParams = BoomFAMicroBT
   val s1_taken  = Wire(Vec(bankWidth, Bool()))
   val s1_is_br  = Wire(Vec(bankWidth, Bool()))
   val s1_is_jal = Wire(Vec(bankWidth, Bool()))
+  val s1_pred_set = Wire(Vec(bankWidth, Valid(UInt(predSetBits.W))))
 
   val s1_hit_ohs = VecInit((0 until bankWidth) map { i =>
     VecInit((0 until nWays) map { w =>
@@ -101,11 +102,14 @@ class FAMicroBTBBranchPredictorBank(params: BoomFAMicroBTBParams = BoomFAMicroBT
 
   for (w <- 0 until bankWidth) {
     val entry_meta = meta(s1_hit_ways(w))(w)
+    val entry_pred_set = pset(s1_hit_ways(w))(w)
     s1_resp(w).valid := s1_valid && s1_hits(w)
     s1_resp(w).bits  := (s1_pc.asSInt + (w << 1).S + btb(s1_hit_ways(w))(w).offset).asUInt
     s1_is_br(w)      := s1_resp(w).valid &&  entry_meta.is_br
     s1_is_jal(w)     := s1_resp(w).valid && !entry_meta.is_br
     s1_taken(w)      := !entry_meta.is_br || entry_meta.ctr(1)
+    s1_pred_set(w).bits := entry_pred_set.pred_set
+    s1_pred_set(w).valid := entry_pred_set.valid
 
     s1_meta.hits(w)     := s1_hits(w)
   }
@@ -123,10 +127,12 @@ class FAMicroBTBBranchPredictorBank(params: BoomFAMicroBTBParams = BoomFAMicroBT
     alloc_way)
 
   for (w <- 0 until bankWidth) {
-    io.resp.f1(w).predicted_pc := s1_resp(w)
-    io.resp.f1(w).is_br        := s1_is_br(w)
-    io.resp.f1(w).is_jal       := s1_is_jal(w)
-    io.resp.f1(w).taken        := s1_taken(w)
+    io.resp.f1(w).predicted_pc   := s1_resp(w)
+    io.resp.f1(w).is_br          := s1_is_br(w)
+    io.resp.f1(w).is_jal         := s1_is_jal(w)
+    io.resp.f1(w).taken          := s1_taken(w)
+    io.resp.f1(w).pred_set.bits       := s1_pred_set(w).bits
+    io.resp.f1(w).pred_set.valid := s1_pred_set(w).valid
 
     when (debug_flag && s1_hits(w)) {
       printf("microBtb f1, cycle: %d", debug_cycles.value)
@@ -196,14 +202,6 @@ class FAMicroBTBBranchPredictorBank(params: BoomFAMicroBTBParams = BoomFAMicroBT
   }.otherwise {
     s1_btb_hit_index.valid := false.B
   }
-
-  for (w <- 0 until bankWidth) {
-    io.resp.f1_pred_set(w).bits := pset(s1_hit_ways(w))(w).pred_set 
-    io.resp.f1_pred_set(w).valid := pset(s1_hit_ways(w))(w).valid
-  }
-
-  io.resp.f2_pred_set := RegNext(io.resp.f1_pred_set)
-  io.resp.f3_pred_set := RegNext(io.resp.f2_pred_set)
 
   // Update pred_set in MicroBTB after address translation
   val update_pc = fetchIdx(io.pred_set_update.bits.pc)

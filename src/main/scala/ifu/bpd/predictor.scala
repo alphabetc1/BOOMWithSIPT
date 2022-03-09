@@ -18,13 +18,14 @@ class BranchPrediction(implicit p: Parameters) extends BoomBundle()(p)
 {
   // If this is a branch, do we take it?
   val taken           = Bool()
-
   // Is this a branch?
   val is_br           = Bool()
   // Is this a JAL?
   val is_jal          = Bool()
   // What is the target of his branch/jump? Do we know the target?
   val predicted_pc    = Valid(UInt(vaddrBitsExtended.W))
+  // What is the pred_set of next branch?
+  val pred_set        = Valid(UInt(predSetBits.W))
 }
 
 // A index for update pred_set_index in BTB
@@ -134,10 +135,6 @@ class BranchPredictionBankResponse(implicit p: Parameters) extends BoomBundle()(
   val f1 = Vec(bankWidth, new BranchPrediction)
   val f2 = Vec(bankWidth, new BranchPrediction)
   val f3 = Vec(bankWidth, new BranchPrediction)
-
-  val f1_pred_set = Vec(bankWidth, Valid(UInt(2.W)))
-  val f2_pred_set = Vec(bankWidth, Valid(UInt(2.W)))
-  val f3_pred_set = Vec(bankWidth, Valid(UInt(2.W)))
 }
 
 abstract class BranchPredictorBank(implicit p: Parameters) extends BoomModule()(p)
@@ -320,10 +317,6 @@ class BranchPredictor(implicit p: Parameters) extends BoomModule()(p)
     io.resp.f3.meta(0)  := banked_predictors(0).io.f3_meta
     io.resp.f3.lhist(0) := banked_lhist_providers(0).io.f3_lhist
 
-    io.resp.f1.pred_set := banked_predictors(0).io.resp.f1_pred_set
-    io.resp.f2.pred_set := banked_predictors(0).io.resp.f2_pred_set
-    io.resp.f3.pred_set := banked_predictors(0).io.resp.f3_pred_set
-
     banked_predictors(0).io.f3_fire := io.f3_fire
     banked_lhist_providers(0).io.f3_fire := io.f3_fire
   } else {
@@ -349,17 +342,11 @@ class BranchPredictor(implicit p: Parameters) extends BoomModule()(p)
       for (i <- 0 until bankWidth) {
         io.resp.f1.preds(i)           := banked_predictors(0).io.resp.f1(i)
         io.resp.f1.preds(i+bankWidth) := banked_predictors(1).io.resp.f1(i)
-
-        io.resp.f1.pred_set(i)        := banked_predictors(0).io.resp.f1_pred_set(i)
-        io.resp.f1.pred_set(i+bankWidth) := banked_predictors(1).io.resp.f1_pred_set(i)
       }
     } .otherwise {
       for (i <- 0 until bankWidth) {
         io.resp.f1.preds(i)           := banked_predictors(1).io.resp.f1(i)
         io.resp.f1.preds(i+bankWidth) := banked_predictors(0).io.resp.f1(i)
-
-        io.resp.f1.pred_set(i)           := banked_predictors(1).io.resp.f1_pred_set(i)
-        io.resp.f1.pred_set(i+bankWidth) := banked_predictors(0).io.resp.f1_pred_set(i)
       }
     }
 
@@ -367,17 +354,11 @@ class BranchPredictor(implicit p: Parameters) extends BoomModule()(p)
       for (i <- 0 until bankWidth) {
         io.resp.f2.preds(i)           := banked_predictors(0).io.resp.f2(i)
         io.resp.f2.preds(i+bankWidth) := banked_predictors(1).io.resp.f2(i)
-
-        io.resp.f2.pred_set(i)           := banked_predictors(0).io.resp.f2_pred_set(i)
-        io.resp.f2.pred_set(i+bankWidth) := banked_predictors(1).io.resp.f2_pred_set(i)
       }
     } .otherwise {
       for (i <- 0 until bankWidth) {
         io.resp.f2.preds(i)           := banked_predictors(1).io.resp.f2(i)
         io.resp.f2.preds(i+bankWidth) := banked_predictors(0).io.resp.f2(i)
-
-        io.resp.f2.pred_set(i)           := banked_predictors(1).io.resp.f2_pred_set(i)
-        io.resp.f2.pred_set(i+bankWidth) := banked_predictors(0).io.resp.f2_pred_set(i)
       }
     }
 
@@ -385,17 +366,11 @@ class BranchPredictor(implicit p: Parameters) extends BoomModule()(p)
       for (i <- 0 until bankWidth) {
         io.resp.f3.preds(i)           := banked_predictors(0).io.resp.f3(i)
         io.resp.f3.preds(i+bankWidth) := banked_predictors(1).io.resp.f3(i)
-
-        io.resp.f3.pred_set(i)           := banked_predictors(0).io.resp.f3_pred_set(i)
-        io.resp.f3.pred_set(i+bankWidth) := banked_predictors(1).io.resp.f3_pred_set(i)
       }
     } .otherwise {
       for (i <- 0 until bankWidth) {
         io.resp.f3.preds(i)           := banked_predictors(1).io.resp.f3(i)
         io.resp.f3.preds(i+bankWidth) := banked_predictors(0).io.resp.f3(i)
-
-        io.resp.f3.pred_set(i)           := banked_predictors(1).io.resp.f3_pred_set(i)
-        io.resp.f3.pred_set(i+bankWidth) := banked_predictors(0).io.resp.f3_pred_set(i)
       }
     }
   }
