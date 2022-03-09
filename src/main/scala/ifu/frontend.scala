@@ -662,6 +662,8 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   val f3_redirects    = Wire(Vec(fetchWidth, Bool()))
   val f3_targs        = Wire(Vec(fetchWidth, UInt(vaddrBitsExtended.W)))
   val f3_cfi_types    = Wire(Vec(fetchWidth, UInt(CFI_SZ.W)))
+  val f3_do_redirect = Wire(Bool())
+  val f3_redirect_idx = Wire(UInt(log2Ceil(fetchWidth).W))
   val f3_shadowed_mask = Wire(Vec(fetchWidth, Bool()))
   val f3_fetch_bundle = Wire(new FetchBundle)
   val f3_mask         = Wire(Vec(fetchWidth, Bool()))
@@ -681,8 +683,8 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   f3_fetch_bundle.shadowed_mask := f3_shadowed_mask
 
         current_pred_set := Mux(f2_do_redirect && f2_pred_set_valid, f2_pred_set, s2_ppc(13, 12))
-  val f3_pred_set = Wire(Vec(fetchWidth, UInt(predSetBits.W)))
-  val f3_pred_set_valid = Wire(Vec(fetchWidth,Bool()))
+  val f3_btb_pred_set = Wire(Vec(fetchWidth, UInt(predSetBits.W)))
+  val f3_btb_pred_set_valid = Wire(Vec(fetchWidth,Bool()))
   // Tracks trailing 16b of previous fetch packet
   val f3_prev_half    = Reg(UInt(16.W))
   // Tracks if last fetchpacket contained a half-inst
@@ -795,8 +797,8 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
         f3_bpd_resp.io.deq.bits.preds(i).predicted_pc.valid &&
         (f3_bpd_resp.io.deq.bits.preds(i).predicted_pc.bits =/= brsigs.target)
       )
-      f3_pred_set(i)     := f3_bpd_resp.io.deq.bits.pred_set(i).bits
-      f3_pred_set_valid(i) := Mux(brsigs.cfi_type === CFI_BR, f3_bpd_resp.io.deq.bits.preds(i).predicted_pc.valid, true.B) && f3_bpd_resp.io.deq.bits.pred_set(i).valid
+      f3_btb_pred_set(i)     := f3_bpd_resp.io.deq.bits.pred_set(i).bits
+      f3_btb_pred_set_valid(i) := Mux(brsigs.cfi_type === CFI_BR, f3_bpd_resp.io.deq.bits.preds(i).predicted_pc.valid, true.B) && f3_bpd_resp.io.deq.bits.pred_set(i).valid
 
       f3_npc_plus4_mask(i) := (if (w == 0) {
         !f3_is_rvc(i) && !bank_prev_is_half
@@ -872,20 +874,26 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   when (f3_clear) {
     f3_prev_is_half := false.B
   }
-  f3_fetch_bundle.cfi_idx.valid := f3_redirects.reduce(_||_)
-  f3_fetch_bundle.cfi_idx.bits  := PriorityEncoder(f3_redirects)
+  f3_do_redirect := f3_redirects.reduce(_||_)
+  f3_redirect_idx := PriorityEncoder(f3_redirects)
+  f3_fetch_bundle.cfi_idx.valid := f3_do_redirect
+  f3_fetch_bundle.cfi_idx.bits  := f3_redirect_idx
 
   f3_fetch_bundle.ras_top := ras.io.read_addr
   // Redirect earlier stages only if the later stage
   // can consume this packet
 
-  val f3_predicted_target = Mux(f3_redirects.reduce(_||_),
+  val f3_predicted_target = Mux(f3_do_redirect,
     Mux(f3_fetch_bundle.cfi_is_ret && useBPD.B && useRAS.B,
       ras.io.read_addr,
-      f3_targs(PriorityEncoder(f3_redirects))
+      f3_targs(f3_redirect_idx)
     ),
     nextFetch(f3_fetch_bundle.pc)
   )
+  // When it comes to ret, using ras's pred_set, else using bpd's pred_set
+  val f3_final_pred_set_valid = Mux(f3_fetch_bundle.cfi_is_ret && useBPD.B && useRAS.B, ras.io.read_pred_set_valid, f3_btb_pred_set_valid(f3_redirect_idx))
+  val f3_final_pred_set = Mux(f3_fetch_bundle.cfi_is_ret && useBPD.B && useRAS.B, ras.io.read_pred_set, f3_btb_pred_set(f3_redirect_idx))
+  
 
   f3_fetch_bundle.next_pc       := f3_predicted_target
   val f3_predicted_ghist = f3_fetch_bundle.ghist.update(
@@ -905,15 +913,19 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
     f3_fetch_bundle.cfi_npc_plus4, 4.U, 2.U)
   ras.io.write_idx   := WrapInc(f3_fetch_bundle.ghist.ras_idx, nRasEntries)
 
+  ras.io.write_pred_set_valid := false.B
+  ras.io.write_pred_set := RegNext(RegNext(last_pred_set))
 
   val f3_correct_f1_ghist = s1_ghist =/= f3_predicted_ghist && enableGHistStallRepair.B
   val f3_correct_f2_ghist = s2_ghist =/= f3_predicted_ghist && enableGHistStallRepair.B
 
+  // TODO: What should we do when ras mispredict the pred_set?
   when (f3.io.deq.valid && f4_ready) {
     when (f3_fetch_bundle.cfi_is_call && f3_fetch_bundle.cfi_idx.valid) {
       ras.io.write_valid := true.B
+      ras.io.write_pred_set_valid := true.B
     }
-    when (f3_redirects.reduce(_||_)) {
+    when (f3_do_redirect) {
       f3_prev_is_half := false.B
     }
     when (s2_valid && s2_vpc === f3_predicted_target && !f3_correct_f2_ghist) {
@@ -937,13 +949,13 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
       }
       f3_fetch_bundle.fsrc := BSRC_3
 
-      current_pred_set := Mux(f3_redirects.reduce(_||_) && f3_pred_set_valid(PriorityEncoder(f3_redirects)), f3_pred_set(PriorityEncoder(f3_redirects)), last_pred_set)
+      current_pred_set := Mux(f3_do_redirect && f3_final_pred_set_valid, f3_final_pred_set, last_pred_set)
 
       // Jump to target predicted by BTB
-      when(f3_redirects.reduce(_||_)){
+      when(f3_do_redirect){
         f3_last_br.valid := true.B
         f3_last_br.pc := RegNext(s2_vpc)
-        f3_last_br.cfi_idx := PriorityEncoder(f3_redirects)
+        f3_last_br.cfi_idx := f3_redirect_idx
         f3_last_br.target := f3_predicted_target
       }
       .otherwise {
@@ -1046,6 +1058,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
 
   when (ftq.io.ras_update && enableRasTopRepair.B) {
     ras.io.write_valid := true.B
+    ras.io.write_pred_set_valid := true.B
     ras.io.write_idx   := ftq.io.ras_update_idx
     ras.io.write_addr  := ftq.io.ras_update_pc
   }
