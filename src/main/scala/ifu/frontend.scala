@@ -586,7 +586,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
       s2_fsrc      := BSRC_2
       s0_tsrc      := BSRC_2
             
-      current_pred_set := Mux(f2_do_redirect && f2_pred_set_valid, f2_pred_set, s2_ppc(13, 12))
+      current_pred_set := Mux(f2_do_redirect && f2_pred_set_valid, f2_pred_set, last_pred_set)
 
       when(debug_flag === true.B) {
         printf("frontend f2, cycle: %d\n, set pred set: %d\n", debug_cycles.value, current_pred_set)
@@ -682,7 +682,6 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   f3_fetch_bundle.tsrc := f3_imemresp.tsrc
   f3_fetch_bundle.shadowed_mask := f3_shadowed_mask
 
-        current_pred_set := Mux(f2_do_redirect && f2_pred_set_valid, f2_pred_set, s2_ppc(13, 12))
   val f3_btb_pred_set = Wire(Vec(fetchWidth, UInt(predSetBits.W)))
   val f3_btb_pred_set_valid = Wire(Vec(fetchWidth,Bool()))
   // Tracks trailing 16b of previous fetch packet
@@ -890,7 +889,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
     ),
     nextFetch(f3_fetch_bundle.pc)
   )
-  // When it comes to ret, using ras's pred_set, else using bpd's pred_set
+  // When it comes to ret, using ras's pred_set, else using btb's pred_set
   val f3_final_pred_set_valid = Mux(f3_fetch_bundle.cfi_is_ret && useBPD.B && useRAS.B, ras.io.read_pred_set_valid, f3_btb_pred_set_valid(f3_redirect_idx))
   val f3_final_pred_set = Mux(f3_fetch_bundle.cfi_is_ret && useBPD.B && useRAS.B, ras.io.read_pred_set, f3_btb_pred_set(f3_redirect_idx))
   
